@@ -3,7 +3,7 @@
    ★ 中身を なおしたら CACHE の 番号を 必ず 上げる ★
    ============================================================ */
 
-const CACHE = 'ishiarai-v4';
+const CACHE = 'ishiarai-v5';
 
 const ASSETS = [
   './',

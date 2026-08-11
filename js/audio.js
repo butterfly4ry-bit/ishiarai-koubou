@@ -364,27 +364,38 @@ export function sfx(name){
   }
 }
 
-/* ---------- こすっている あいだ 鳴る 水の音 ---------- */
+/* ---------- こすっている あいだ 鳴る 水／たわしの音 ----------
+   ノードは いちど 作ったら 作りなおさない（音量だけ 上げ下げする）。
+   何度も 作って 捨てると、はやく タップした ときに ノードが たまって
+   音が つまったり 重くなったり する。 */
+function ensureStream(){
+  if (stream || !ac) return stream;
+  const n = noise();
+  const bp = ac.createBiquadFilter();
+  bp.type = 'lowpass'; bp.frequency.value = 1800; bp.Q.value = 1;
+  const g = ac.createGain(); g.gain.value = 0;
+  n.connect(bp); bp.connect(g); g.connect(seG);
+  n.start();
+  stream = { n, g, bp };
+  return stream;
+}
+
 export function waterStream(on, kind = 'water'){
-  if (!ac || !opts.se) return;
+  if (!ac) return;
+  const s = ensureStream();
+  if (!s) return;
   if (on){
-    if (stream) { stream.g.gain.setTargetAtTime(.35, ac.currentTime, .05); return; }
-    const n = noise();
-    const bp = ac.createBiquadFilter();
-    bp.type = kind === 'brush' ? 'bandpass' : 'lowpass';
-    bp.frequency.value = kind === 'brush' ? 3000 : 1800;
-    bp.Q.value = 1;
-    const g = ac.createGain(); g.gain.value = 0;
-    n.connect(bp); bp.connect(g); g.connect(seG);
-    n.start();
-    g.gain.setTargetAtTime(.35, ac.currentTime, .06);
-    stream = { n, g, bp };
-  } else if (stream){
-    const s = stream; stream = null;
-    s.g.gain.setTargetAtTime(0, ac.currentTime, .12);
-    setTimeout(() => { try{ s.n.stop(); s.g.disconnect(); }catch(e){} }, 500);
+    streamKind(kind);
+    s.g.gain.setTargetAtTime(opts.se ? .35 : 0, ac.currentTime, .06);
+  } else {
+    s.g.gain.setTargetAtTime(0, ac.currentTime, .10);
   }
 }
+
 export function streamKind(kind){
-  if (stream) stream.bp.frequency.setTargetAtTime(kind === 'brush' ? 3000 : 1800, ac.currentTime, .1);
+  if (!stream || !ac) return;
+  const brush = kind === 'brush';
+  stream.bp.type = brush ? 'bandpass' : 'lowpass';
+  stream.bp.frequency.setTargetAtTime(brush ? 3200 : 1800, ac.currentTime, .08);
+  stream.bp.Q.setTargetAtTime(brush ? 1.6 : 1, ac.currentTime, .08);
 }
