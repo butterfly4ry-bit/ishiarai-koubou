@@ -33,10 +33,16 @@ bindButtons();
 
 field.init($('#cv-field'), $('#field-fx'), onPickedInField);
 wash.init($('#cv-wash'), $('#cv-polish'), {
-  onWashProgress: p => {
-    $('#wash-fill').style.width = (p * 100).toFixed(0) + '%';
-    $('#wash-label').textContent = 'どろ ' + Math.max(0, Math.round((1 - p) * 100)) + '%';
-    st.save();
+  onWashProgress: (mud, crust) => { showWashMeters(mud, crust); st.save(); },
+  onNeedBrush: () => {
+    pickTool('brush');
+    $('#wash-tip').textContent = 'ゆるい どろは おちた。のこりは たわしで こすろう';
+    toast('たわしに もちかえた。');
+    sound.sfx('tap');
+  },
+  onHint: msg => {
+    $('#wash-tip').textContent = msg || defaultWashTip();
+    $('#wash-tip').classList.toggle('warn', !!msg);
   },
   onWashDone: toPolish,
   onPolish: gl => {
@@ -232,9 +238,9 @@ function bindButtons(){
 
   $$('#sc-wash .btn.tool').forEach(b => {
     b.addEventListener('click', () => {
-      $$('#sc-wash .btn.tool').forEach(x => x.classList.remove('sel'));
-      b.classList.add('sel');
-      wash.setTool(b.dataset.tool);
+      pickTool(b.dataset.tool);
+      $('#wash-tip').textContent = defaultWashTip();
+      $('#wash-tip').classList.remove('warn');
       sound.sfx('tap');
     });
   });
@@ -377,13 +383,34 @@ function renderBasket(){
   refreshTop();
 }
 
+/* どうぐを えらぶ */
+function pickTool(name){
+  $$('#sc-wash .btn.tool').forEach(x => x.classList.toggle('sel', x.dataset.tool === name));
+  wash.setTool(name);
+}
+function defaultWashTip(){
+  return wash.getTool() === 'water'
+    ? 'みずを かけて、ゆるい どろを 流そう'
+    : 'たわしで こびりつきを こすろう';
+}
+
+/* 2本の メーター */
+function showWashMeters(mud, crust){
+  $('#wash-fill').style.width = ((1 - mud) * 100).toFixed(0) + '%';
+  $('#wash-label').textContent = mud > 0 ? 'どろ ' + Math.round(mud * 100) + '%' : 'どろ ぜんぶ おちた';
+  $('#crust-fill').style.width = ((1 - crust) * 100).toFixed(0) + '%';
+  $('#crust-label').textContent = crust > 0 ? 'こびりつき ' + Math.round(crust * 100) + '%' : 'こびりつき なし';
+}
+
 function beginWash(uid){
   const cur = st.startWash(uid);
   if (!cur) return;
   wash.setStone(cur);
   setPhase('wash');
-  $('#wash-fill').style.width = '0%';
-  $('#wash-label').textContent = 'どろ 100%';
+  pickTool('water');
+  showWashMeters(1, 1);
+  $('#wash-tip').textContent = defaultWashTip();
+  $('#wash-tip').classList.remove('warn');
   $('#polish-fill').style.width = '0%';
   $('#polish-label').textContent = 'つや 0%';
   sound.sfx('drop');
@@ -394,10 +421,13 @@ function beginWash(uid){
 function resumeWash(){
   // すでに 同じ石を あらっている ときは 作りなおさない
   if (wash.current() !== S.cur) wash.setStone(S.cur);
-  if (S.cur.mud > 0){
+  const mud = S.cur.mud, crust = S.cur.crust == null ? 1 : S.cur.crust;
+  if (mud > 0 || crust > 0){
     setPhase('wash');
-    $('#wash-fill').style.width = ((1 - S.cur.mud) * 100).toFixed(0) + '%';
-    $('#wash-label').textContent = 'どろ ' + Math.round(S.cur.mud * 100) + '%';
+    pickTool(mud > 0 ? 'water' : 'brush');
+    showWashMeters(mud, crust);
+    $('#wash-tip').textContent = defaultWashTip();
+    $('#wash-tip').classList.remove('warn');
   } else {
     setPhase('polish');
     $('#polish-fill').style.width = ((S.cur.gloss || 0) * 100).toFixed(0) + '%';
@@ -407,9 +437,9 @@ function resumeWash(){
 
 function toPolish(){
   setPhase('polish');
-  $('#polish-fill').style.width = '0%';
-  $('#polish-label').textContent = 'つや 0%';
-  toast('どろが おちた！ 布で みがこう。');
+  $('#polish-fill').style.width = ((S.cur?.gloss || 0) * 100).toFixed(0) + '%';
+  $('#polish-label').textContent = 'つや ' + Math.round((S.cur?.gloss || 0) * 100) + '%';
+  toast('きれいに なった！ 布で みがこう。');
   st.save();
 }
 

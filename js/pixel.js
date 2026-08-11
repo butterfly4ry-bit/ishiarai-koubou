@@ -64,13 +64,53 @@ export function lighten(c, t){ return mixc(c, '#ffffff', t); }
 export function darken(c, t){ return mixc(c, '#241a12', t); }
 export function scaleRGB(c, k){ const A = hex2rgb(c); return [A[0] * k, A[1] * k, A[2] * k]; }
 
-/* ---------- キャンバス ---------- */
-export function makeCv(w, h){
+/* ---------- キャンバス ----------
+   readFreq を true にすると getImageData が速くなる（CPU側に置かれる）。
+   どろの けずり具合を 何度も 読む キャンバスは これを つける。 */
+export function makeCv(w, h, readFreq = false){
   const cv = document.createElement('canvas');
   cv.width = w; cv.height = h;
-  const g = cv.getContext('2d');
+  const g = cv.getContext('2d', readFreq ? { willReadFrequently: true } : undefined);
   g.imageSmoothingEnabled = false;
   return { cv, g };
+}
+
+/* ---------- けずる用の 丸い はんこ ----------
+   fillRect を 何百回も 呼ぶより はんこを 1枚 貼るほうが ずっと 速い。
+   合成モードの 切りかえも まとめて 1回で すむ。 */
+const stampCache = new Map();
+export function circleStamp(r){
+  const key = Math.round(r * 2) / 2;
+  if (stampCache.has(key)) return stampCache.get(key);
+  const S = Math.ceil(key * 2) + 2;
+  const { cv, g } = makeCv(S, S);
+  const c = S / 2;
+  g.fillStyle = '#000';
+  for (let dy = -key; dy <= key; dy++){
+    const w = Math.sqrt(Math.max(0, key * key - dy * dy));
+    if (w <= 0) continue;
+    g.fillRect(Math.round(c - w), Math.round(c + dy), Math.max(1, Math.round(w * 2)), 1);
+  }
+  stampCache.set(key, cv);
+  return cv;
+}
+
+/* 点の れつを まとめて けずる（合成モードの きりかえは 1回だけ） */
+export function eraseAlong(ctx, pts, r){
+  if (!pts.length) return;
+  const st = circleStamp(r), o = st.width / 2;
+  ctx.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < pts.length; i++)
+    ctx.drawImage(st, Math.round(pts[i][0] - o), Math.round(pts[i][1] - o));
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+/* 残っている ドットの数（アルファが ある ぶん） */
+export function countAlpha(ctx, w, h, min = 40){
+  const d = ctx.getImageData(0, 0, w, h).data;
+  let n = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > min) n++;
+  return n;
 }
 export function ctx2d(cv){
   const g = cv.getContext('2d');

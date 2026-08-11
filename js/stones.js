@@ -774,6 +774,58 @@ export function renderMud(seed = 1, S = 48){
   return cv;
 }
 
+/* ---------- こびりついた どろ ----------
+   石の 表面に かたく はりついた よごれ。水では おちない ので ブラシで こする。
+   石の かたちで 切りぬくので、はみ出さない。
+   --------------------------------------------------------- */
+export function renderCrust(defOrId, seed = 1, S = 56){
+  const def = typeof defOrId === 'string' ? STONE_BY_ID[defOrId] : defOrId;
+  const { cv, g } = makeCv(S, S, true);
+  const buf = new Buf(S, S);
+  const r = rng(seed * 13 + 91);
+
+  // かたまりを いくつか
+  const lumps = [];
+  const n = 3 + ((r() * 3) | 0);
+  for (let i = 0; i < n; i++){
+    const a = r() * Math.PI * 2, d = r() * .34;
+    lumps.push({
+      cx: S / 2 + Math.cos(a) * d * S,
+      cy: S / 2 + Math.sin(a) * d * S,
+      rad: S * (.11 + r() * .11),
+      s: (r() * 1e6) | 0,
+    });
+  }
+  const P = ['#4a3420', '#5f452b', '#75563a', '#3a2818'];
+
+  for (let y = 0; y < S; y++){
+    for (let x = 0; x < S; x++){
+      let hit = 0;
+      for (const L of lumps){
+        const u = (x + .5 - L.cx) / L.rad, v = (y + .5 - L.cy) / L.rad;
+        const d = Math.hypot(u, v) + (fbm(u * 1.8 + 3, v * 1.8 + 3, L.s, 3) - .5) * .85;
+        if (d < 1){ hit = 1 - d; break; }
+      }
+      if (!hit) continue;
+      const t = fbm(x * .22, y * .22, seed + 5, 3);
+      let c = mixc(P[0], P[2], Math.round(clamp(t, 0, 1) * 3) / 3);
+      const hp = hashInt(x, y, seed + 9) / 4294967296;
+      if (hp < .12) c = hex2rgb(P[3]);
+      else if (hp < .18) c = mixc(P[2], '#8f7a52', .5);
+      if (hit > .62) c = mixc(c, '#ffffff', .12);          // もりあがり
+      if (hit < .12) c = mixc(c, '#241a12', .3);           // ふちの かげ
+      buf.set(x, y, c, 255);
+    }
+  }
+  g.putImageData(buf.img, 0, 0);
+
+  // 石の かたちで 切りぬく
+  g.globalCompositeOperation = 'destination-in';
+  g.drawImage(renderStone(def, seed, S, 'normal', 0), 0, 0);
+  g.globalCompositeOperation = 'source-over';
+  return cv;
+}
+
 /* ---------- 星の 表示 ---------- */
 export function stars(n){ return '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(0, 5 - n); }
 

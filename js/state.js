@@ -178,7 +178,7 @@ export function startWash(uidStr){
   const i = S.basket.findIndex(b => b.uid === uidStr);
   if (i < 0) return null;
   const b = S.basket[i];
-  S.cur = { uid: b.uid, id: b.id, seed: b.seed, mud: 1, gloss: 0, phase: 'wash' };
+  S.cur = { uid: b.uid, id: b.id, seed: b.seed, mud: 1, crust: 1, gloss: 0, phase: 'wash' };
   S.basket.splice(i, 1);
   save();
   return S.cur;

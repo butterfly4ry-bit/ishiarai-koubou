@@ -1,26 +1,43 @@
 /* =========================================================
    wash.js — あらい場（どろを おとす → みがく）
-   ・どろの 層を 指で けずる
+   ・どろは 2そう。
+     ①「ゆるい どろ」…水で ざっと 流せる（石より 大きく かぶさっている）
+     ②「こびりつき」…石の 表面に かたく はりついた よごれ。水では おちない。
+                      ブラシで こすって おとす。
    ・けずった 割合を かぞえて すすみ具合に する
    ========================================================= */
 
-import { renderStone, renderMud } from './stones.js';
-import { makeCv, mixc, rgb2hex, clamp } from './pixel.js';
+import { renderStone, renderMud, renderCrust } from './stones.js';
+import { makeCv, mixc, rgb2hex, clamp, eraseAlong, countAlpha } from './pixel.js';
 import * as sound from './audio.js';
 import { canvasPos } from './ui.js';
 
-const C = 160;          // キャンバスの 大きさ
-const SS = 56;          // 石とどろの もとの 大きさ（ドット）
-const OX = 24, OY = 22; // 石を おく 位置（2倍で 112px）
+const C = 160;            // キャンバスの 大きさ
+const SS = 56;            // どろ・石の もとの 大きさ（ドット）
+const OX = 24, OY = 22;   // どろを おく 位置（2倍で 112px）
+const SOFF = 14, SSZ = 84;// 石（と こびりつき）は すこし 小さめ
+
+// どうぐの ききめ（それぞれの そうを けずる 半径。0 は ききめなし）
+const TOOL = {
+  water: { mud: 6.0, crust: 0,   se: 'water' },
+  brush: { mud: 3.4, crust: 4.4, se: 'brush' },
+};
+
+const MAX_DROPS = 90, MAX_RIPPLES = 10, MAX_SPARKS = 40;
+const MAX_PENDING = 220;   // 1フレームで さばく 点の 上限
 
 let gw, gp, cvW, cvP;
-let mudCv = null, mudG = null, mudBase = 0;
-let cur = null;                 // { id, seed, mud, gloss }
+let mudCv = null, mudG = null, mudBase = 1;
+let crustCv = null, crustG = null, crustBase = 1;
+let cur = null;                 // { id, seed, mud, crust, gloss }
 let ripples = [], drops = [], sparks = [];
+let pending = [];               // まだ けずっていない 点（1フレームに 1回 まとめて 処理）
 let tool = 'water';
 let t = 0, rubbing = false, lastPt = null, moveAcc = 0;
 let cb = {};
-let checkTimer = 0;
+let checkTimer = 0, hintTimer = 0;
+let wasteful = 0;               // 水で こびりつきを こすった 回数
+let switched = false;           // ブラシに もちかえた 案内を 出したか
 let basinCache = null;
 
 export function init(canvasWash, canvasPolish, callbacks){
@@ -32,57 +49,60 @@ export function init(canvasWash, canvasPolish, callbacks){
   bindPointer(cvP, onPolishMove);
 }
 
-export function setTool(x){ tool = x; sound.streamKind(x); }
+export function setTool(x){
+  tool = x;
+  sound.streamKind(x);
+}
 export function getTool(){ return tool; }
 
 /* ---------- 石を セット ---------- */
 export function setStone(c){
   cur = c;
-  ripples = []; drops = []; sparks = [];
-  const m = makeCv(SS, SS);
+  if (cur.crust == null) cur.crust = 1;
+  ripples = []; drops = []; sparks = []; pending = [];
+  wasteful = 0; switched = false;
+
+  const m = makeCv(SS, SS, true);
   mudCv = m.cv; mudG = m.g;
   mudG.drawImage(renderMud(c.seed, SS), 0, 0);
-  mudBase = countMud();
-  // 途中から 再開する ばあいは 進み具合を もどす
-  if (c.mud < 1) eraseFraction(1 - c.mud);
-}
+  mudBase = Math.max(1, countAlpha(mudG, SS, SS));
 
-function countMud(){
-  const d = mudG.getImageData(0, 0, SS, SS).data;
-  let n = 0;
-  for (let i = 3; i < d.length; i += 4) if (d[i] > 40) n++;
-  return n;
+  const k = makeCv(SS, SS, true);
+  crustCv = k.cv; crustG = k.g;
+  crustG.drawImage(renderCrust(c.id, c.seed, SS), 0, 0);
+  crustBase = Math.max(1, countAlpha(crustG, SS, SS));
+
+  // 途中から 再開する ばあいは だいたいの すすみ具合を もどす
+  if (c.mud < 1) scatterErase(mudG, 1 - c.mud, 5);
+  if (c.crust < 1) scatterErase(crustG, 1 - c.crust, 4);
 }
 
 /* 復帰用: だいたい fr の 割合を けずる */
-function eraseFraction(fr){
+function scatterErase(ctx, fr, r){
   if (fr <= 0) return;
-  const n = Math.round(fr * 120);
-  for (let i = 0; i < n; i++)
-    erase(Math.random() * SS, Math.random() * SS, 4);
+  const pts = [];
+  const n = Math.round(fr * 140);
+  for (let i = 0; i < n; i++) pts.push([Math.random() * SS, Math.random() * SS]);
+  eraseAlong(ctx, pts, r);
 }
 
-/* ---------- どろを けずる ---------- */
-function erase(x, y, r){
-  mudG.globalCompositeOperation = 'destination-out';
-  mudG.fillStyle = '#000';
-  for (let dy = -r; dy <= r; dy++){
-    const w = Math.sqrt(Math.max(0, r * r - dy * dy));
-    mudG.fillRect(Math.round(x - w), Math.round(y + dy), Math.max(1, Math.round(w * 2)), 1);
-  }
-  mudG.globalCompositeOperation = 'source-over';
-}
-
+/* ---------- 指の うごき ---------- */
 function bindPointer(canvas, moveFn){
   const down = ev => {
     ev.preventDefault();
     try{ canvas.setPointerCapture?.(ev.pointerId); }catch(e){}
     rubbing = true; lastPt = canvasPos(canvas, ev);
+    document.body.classList.add('rubbing');     // 画面が うごかないように
     sound.init(); sound.waterStream(true, tool);
     moveFn(ev, true);
   };
-  const move = ev => { if (rubbing) { ev.preventDefault(); moveFn(ev, false); } };
-  const up = () => { rubbing = false; lastPt = null; sound.waterStream(false); };
+  const move = ev => { if (rubbing){ ev.preventDefault(); moveFn(ev, false); } };
+  const up = () => {
+    if (!rubbing) return;
+    rubbing = false; lastPt = null;
+    document.body.classList.remove('rubbing');
+    sound.waterStream(false);
+  };
   canvas.addEventListener('pointerdown', down);
   canvas.addEventListener('pointermove', move);
   canvas.addEventListener('pointerup', up);
@@ -94,36 +114,80 @@ function bindPointer(canvas, moveFn){
 function onWashMove(ev, isDown){
   if (!cur) return;
   const p = canvasPos(cvW, ev);
-  const mx = (p.x - OX) / 2, my = (p.y - OY) / 2;   // どろキャンバスの 座標
-  const r = tool === 'water' ? 5.5 : 3.5;
+  const T = TOOL[tool] || TOOL.water;
+  // ほんの わずかな ゆれは 無視（むだな 計算を へらす）
+  if (!isDown && lastPt && Math.hypot(p.x - lastPt.x, p.y - lastPt.y) < .8) return;
 
+  /* 前の 点から 線で つないで ためておく。
+     じっさいに けずるのは 1フレームに 1回（描画の ときに まとめて）。
+     こうすると 指を どれだけ 速く うごかしても 仕事の 量が ふえすぎない。 */
   if (lastPt && !isDown){
-    // 前の 点から 線で つなぐ（速く なでても とぎれない）
-    const steps = Math.max(1, Math.round(Math.hypot(p.x - lastPt.x, p.y - lastPt.y) / 3));
-    for (let i = 1; i <= steps; i++){
+    const dist = Math.hypot(p.x - lastPt.x, p.y - lastPt.y);
+    const steps = Math.max(1, Math.min(20, Math.round(dist / 3)));
+    for (let i = 1; i <= steps && pending.length < MAX_PENDING; i++){
       const q = i / steps;
-      const ex = ((lastPt.x + (p.x - lastPt.x) * q) - OX) / 2;
-      const ey = ((lastPt.y + (p.y - lastPt.y) * q) - OY) / 2;
-      erase(ex, ey, r);
+      pending.push([lastPt.x + (p.x - lastPt.x) * q, lastPt.y + (p.y - lastPt.y) * q, tool]);
     }
-  } else erase(mx, my, r);
+  } else if (pending.length < MAX_PENDING) pending.push([p.x, p.y, tool]);
 
-  if (Math.random() < .5) ripples.push({ x: p.x, y: p.y, r: 2, a: .5 });
-  for (let i = 0; i < (tool === 'water' ? 2 : 1); i++)
-    drops.push({ x: p.x, y: p.y, vx: (Math.random() - .5) * 60, vy: -20 - Math.random() * 50, a: 1 });
+  /* つぶ・しぶきの えんしゅつ（どうぐで ちがう） */
+  if (tool === 'water'){
+    if (ripples.length < MAX_RIPPLES && Math.random() < .5)
+      ripples.push({ x: p.x, y: p.y, r: 2, a: .5 });
+    for (let i = 0; i < 2 && drops.length < MAX_DROPS; i++)
+      drops.push({ x: p.x, y: p.y, vx: (Math.random() - .5) * 60, vy: -20 - Math.random() * 50, a: 1, c: 0 });
+  } else {
+    for (let i = 0; i < 3 && drops.length < MAX_DROPS; i++)
+      drops.push({ x: p.x, y: p.y, vx: (Math.random() - .5) * 90, vy: -30 - Math.random() * 60, a: 1, c: 1 });
+  }
+
+  // 水で こびりつきを こすっても おちない ことを 知らせる
+  if (T.crust === 0 && cur.mud < .12 && cur.crust > .05){
+    wasteful++;
+    if (wasteful === 26) hint('この よごれは 水だけでは おちない。ブラシで こすろう。');
+  }
 
   lastPt = p;
-  if (!checkTimer) checkTimer = setTimeout(checkDone, 160);
+}
+
+/* ためた 点を まとめて けずる（1フレームに 1回だけ 呼ばれる） */
+function flushPending(){
+  if (!pending.length || !cur) return;
+  for (const name of ['water', 'brush']){
+    const T = TOOL[name];
+    const pts = pending.filter(q => q[2] === name);
+    if (!pts.length) continue;
+    if (T.mud > 0)
+      eraseAlong(mudG, pts.map(([x, y]) => [(x - OX) / 2, (y - OY) / 2]), T.mud);
+    if (T.crust > 0)
+      eraseAlong(crustG, pts.map(([x, y]) => [(x - SOFF - OX) / 1.5, (y - SOFF - OY) / 1.5]), T.crust);
+  }
+  pending.length = 0;
+  if (!checkTimer) checkTimer = setTimeout(checkDone, 170);
+}
+
+function hint(msg){
+  if (cb.onHint) cb.onHint(msg);
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => { if (cb.onHint) cb.onHint(null); }, 4200);
 }
 
 function checkDone(){
   checkTimer = 0;
   if (!cur) return;
-  const left = countMud() / Math.max(1, mudBase);
-  cur.mud = clamp(left, 0, 1);
-  if (cb.onWashProgress) cb.onWashProgress(1 - cur.mud);
-  if (cur.mud < .03){
-    cur.mud = 0;
+  cur.mud   = clamp(countAlpha(mudG, SS, SS) / mudBase, 0, 1);
+  cur.crust = clamp(countAlpha(crustG, SS, SS) / crustBase, 0, 1);
+  // 「ほとんど おちた」なら きれいに なった ことに する（さがし回らせない）
+  if (cur.mud < .05) cur.mud = 0;
+  if (cur.crust < .08) cur.crust = 0;
+  if (cb.onWashProgress) cb.onWashProgress(cur.mud, cur.crust);
+
+  // ゆるい どろが おちたら ブラシに もちかえる
+  if (cur.mud === 0 && cur.crust > 0 && !switched){
+    switched = true;
+    if (cb.onNeedBrush) cb.onNeedBrush();
+  }
+  if (cur.mud === 0 && cur.crust === 0){
     sound.waterStream(false);
     sound.sfx('splash');
     if (cb.onWashDone) cb.onWashDone();
@@ -141,8 +205,8 @@ function onPolishMove(ev, isDown){
       moveAcc += d;
       const before = cur.gloss;
       cur.gloss = clamp(cur.gloss + d * .0014, 0, 1);
-      if (cur.gloss > before && Math.random() < .5)
-        sparks.push({ x: p.x, y: p.y, a: 1, s: 1 + Math.random() * 2 });
+      if (cur.gloss > before && sparks.length < MAX_SPARKS && Math.random() < .5)
+        sparks.push({ x: p.x, y: p.y, a: 1 });
       if (moveAcc > 60){ moveAcc = 0; sound.sfx('polish'); }
       if (cb.onPolish) cb.onPolish(cur.gloss);
     }
@@ -191,6 +255,7 @@ function basin(){
 export function drawWash(dt){
   if (!cur) return;
   t += dt;
+  flushPending();                 // ためた 指の うごきを ここで 反映
   gw.clearRect(0, 0, C, C);
   gw.drawImage(basin(), 0, 0);
 
@@ -201,16 +266,13 @@ export function drawWash(dt){
     gw.fillRect(x, y, 8 + (y % 5), 1);
   }
 
-  // 石（どろの 下。はみ出さないように すこし 小さめ）
+  // 石 → こびりつき → ゆるい どろ の じゅんに かさねる
   const st = renderStone(cur.id, cur.seed, SS, 'normal', cur.gloss || 0);
-  gw.save();
-  gw.imageSmoothingEnabled = false;
-  gw.drawImage(st, OX + 14, OY + 14, 84, 84);
-  // どろ（うえに かぶさる）
+  gw.drawImage(st, OX + SOFF, OY + SOFF, SSZ, SSZ);
+  gw.drawImage(crustCv, OX + SOFF, OY + SOFF, SSZ, SSZ);
   gw.drawImage(mudCv, OX, OY, SS * 2, SS * 2);
-  gw.restore();
 
-  // なみ もん
+  // なみもん
   ripples = ripples.filter(r => r.a > .02);
   for (const r of ripples){
     r.r += 34 * dt; r.a -= dt * 1.2;
@@ -218,11 +280,13 @@ export function drawWash(dt){
     gw.lineWidth = 1;
     gw.beginPath(); gw.arc(r.x, r.y, r.r, 0, 6.284); gw.stroke();
   }
-  // しぶき
+  // しぶき（水）／ どろの つぶ（ブラシ）
   drops = drops.filter(d => d.a > .05);
   for (const d of drops){
     d.x += d.vx * dt; d.y += d.vy * dt; d.vy += 180 * dt; d.a -= dt * 1.1;
-    gw.fillStyle = `rgba(232,248,252,${d.a.toFixed(2)})`;
+    gw.fillStyle = d.c
+      ? `rgba(110,81,54,${d.a.toFixed(2)})`
+      : `rgba(232,248,252,${d.a.toFixed(2)})`;
     gw.fillRect(d.x | 0, d.y | 0, 1, 1);
   }
 
@@ -233,14 +297,19 @@ export function drawWash(dt){
 function drawTool(g, x, y){
   x |= 0; y |= 0;
   if (tool === 'water'){
+    // ひしゃく から 水が 落ちている
     g.fillStyle = 'rgba(200,240,250,.85)';
     for (let i = 0; i < 5; i++) g.fillRect(x - 6 + i * 3, y - 12 - i, 1, 6 + i);
     g.fillStyle = '#9fd8e4'; g.fillRect(x - 8, y - 20, 14, 4);
     g.fillStyle = '#7fb8c8'; g.fillRect(x - 8, y - 20, 14, 1);
+    g.fillStyle = '#8f6a3c'; g.fillRect(x + 6, y - 19, 6, 2);
   } else {
-    g.fillStyle = '#8f6a3c'; g.fillRect(x - 7, y - 14, 14, 4);
+    // たわし
+    const sh = Math.sin(t * 22) > 0 ? 1 : 0;      // こする ふるえ
+    g.fillStyle = '#8f6a3c'; g.fillRect(x - 8 + sh, y - 15, 16, 5);
+    g.fillStyle = '#a8804c'; g.fillRect(x - 8 + sh, y - 15, 16, 1);
     g.fillStyle = '#d8b878';
-    for (let i = 0; i < 7; i++) g.fillRect(x - 6 + i * 2, y - 10, 1, 5);
+    for (let i = 0; i < 8; i++) g.fillRect(x - 7 + sh + i * 2, y - 10, 1, 6);
   }
 }
 
@@ -249,7 +318,6 @@ export function drawPolish(dt){
   if (!cur) return;
   t += dt;
   gp.clearRect(0, 0, C, C);
-  // やわらかい 背景（作業台）
   const grd = gp.createLinearGradient(0, 0, 0, C);
   grd.addColorStop(0, '#f6ecd8'); grd.addColorStop(1, '#e0cba8');
   gp.fillStyle = grd; gp.fillRect(0, 0, C, C);
@@ -264,7 +332,6 @@ export function drawPolish(dt){
   const st = renderStone(cur.id, cur.seed, SS, 'normal', cur.gloss || 0);
   gp.drawImage(st, OX, OY - 6, SS * 2, SS * 2);
 
-  // きらきら
   sparks = sparks.filter(s => s.a > .05);
   for (const s of sparks){
     s.a -= dt * 1.4;
@@ -272,7 +339,6 @@ export function drawPolish(dt){
     gp.fillRect(s.x | 0, (s.y | 0) - 1, 1, 3);
     gp.fillRect((s.x | 0) - 1, s.y | 0, 3, 1);
   }
-  // つやが 高いと ときどき 光の すじ
   if ((cur.gloss || 0) > .5 && (t % 3) < .35){
     const k = ((t % 3) / .35);
     gp.globalAlpha = .5 * (1 - Math.abs(k - .5) * 2);
@@ -289,4 +355,12 @@ export function drawPolish(dt){
 }
 
 export function current(){ return cur; }
-export function clearStone(){ cur = null; }
+export function clearStone(){
+  cur = null;
+  rubbing = false; lastPt = null;
+  clearTimeout(checkTimer); checkTimer = 0;
+  clearTimeout(hintTimer); hintTimer = 0;
+  ripples = []; drops = []; sparks = []; pending = [];
+  document.body.classList.remove('rubbing');
+  sound.waterStream(false);
+}
