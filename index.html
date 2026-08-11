@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>いしあらい工房</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, maximum-scale=1">
+<meta name="theme-color" content="#cfe3d8">
+<meta name="description" content="どろだらけの石を水で洗って、光にかざして正体をたしかめる。のんびり石ころを集める癒しのゲーム。">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="いしあらい">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/icon-180.png">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ================= 上のバー ================= -->
+  <header id="topbar">
+    <div class="chip" id="chip-place"><span class="ic">📍</span><span id="ui-place">かわら</span></div>
+    <div class="chip" id="chip-weather"><span class="ic" id="ui-weather-ic">☀</span><span id="ui-weather">はれ</span></div>
+    <div class="grow"></div>
+    <div class="chip" id="chip-basket"><span class="ic">🧺</span><span id="ui-basket">0</span><span class="dim">/12</span></div>
+    <button class="icon-btn" id="btn-settings" aria-label="せってい">☰</button>
+  </header>
+
+  <!-- ================= 画面 ================= -->
+  <main id="stage">
+
+    <!-- ---------- ひろう（フィールド） ---------- -->
+    <section class="screen on" id="sc-field">
+      <div class="cv-wrap ratio-field">
+        <canvas id="cv-field" width="160" height="240"></canvas>
+        <div class="cv-overlay" id="field-fx"></div>
+      </div>
+      <p class="murmur" id="field-murmur">きょうも いい 石が ありそう。</p>
+      <div class="row">
+        <button class="btn wide" id="btn-places">ばしょを かえる</button>
+        <button class="btn" id="btn-collect-all">まとめて ひろう</button>
+      </div>
+    </section>
+
+    <!-- ---------- あらう（工房） ---------- -->
+    <section class="screen" id="sc-wash" data-phase="pick">
+
+      <!-- かごから選ぶ -->
+      <div class="phase" data-when="pick">
+        <div class="workshop-head">
+          <div class="ws-scene"><canvas id="cv-workshop" width="160" height="72"></canvas></div>
+          <p class="murmur" id="ws-murmur">どの 石から あらおうか。</p>
+        </div>
+        <h2 class="h2">かごの なかみ</h2>
+        <div class="basket-grid" id="basket-grid"></div>
+        <p class="empty-note" id="basket-empty">かごは からっぽ。<br>「ひろう」で 石を あつめよう。</p>
+      </div>
+
+      <!-- 洗う -->
+      <div class="phase" data-when="wash">
+        <div class="cv-wrap ratio-sq basin">
+          <canvas id="cv-wash" width="160" height="160"></canvas>
+        </div>
+        <div class="meter"><div class="meter-fill" id="wash-fill"></div><span class="meter-label" id="wash-label">どろ 100%</span></div>
+        <p class="tip" id="wash-tip">ゆびで なでて どろを おとそう</p>
+        <div class="row">
+          <button class="btn tool sel" id="tool-water" data-tool="water"><span class="ic">💧</span>みず</button>
+          <button class="btn tool" id="tool-brush" data-tool="brush"><span class="ic">🧹</span>ブラシ</button>
+          <button class="btn ghost" id="btn-wash-back">あとで</button>
+        </div>
+      </div>
+
+      <!-- 磨く -->
+      <div class="phase" data-when="polish">
+        <div class="cv-wrap ratio-sq basin">
+          <canvas id="cv-polish" width="160" height="160"></canvas>
+        </div>
+        <div class="meter shine"><div class="meter-fill" id="polish-fill"></div><span class="meter-label" id="polish-label">つや 0%</span></div>
+        <p class="tip">やわらかい 布で こすると つやが でる</p>
+        <div class="row">
+          <button class="btn wide" id="btn-to-light">ひかりに かざす →</button>
+        </div>
+      </div>
+
+      <!-- 光にかざす -->
+      <div class="phase" data-when="light">
+        <div class="cv-wrap ratio-light">
+          <canvas id="cv-light" width="160" height="200"></canvas>
+        </div>
+        <div class="meter warm"><div class="meter-fill" id="light-fill"></div><span class="meter-label" id="light-label">かざして…</span></div>
+        <p class="tip">石を つまんで まどの ひかりに かさねる</p>
+      </div>
+
+      <!-- 結果 -->
+      <div class="phase" data-when="result">
+        <div class="result-card" id="result-card">
+          <div class="rc-new" id="rc-new">はじめて みつけた！</div>
+          <div class="rc-stone"><canvas id="cv-result" width="96" height="96"></canvas></div>
+          <div class="rc-name"><span id="rc-name">—</span><small id="rc-kanji"></small></div>
+          <div class="rc-stars" id="rc-rarity"></div>
+          <div class="rc-gloss" id="rc-gloss"></div>
+          <p class="rc-desc" id="rc-desc"></p>
+          <p class="rc-light" id="rc-light"></p>
+        </div>
+        <div class="row">
+          <button class="btn wide primary" id="btn-result-ok">しまう</button>
+          <button class="btn" id="btn-result-next">つぎを あらう</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- ずかん ---------- -->
+    <section class="screen" id="sc-dex">
+      <div class="dex-head">
+        <h2 class="h2">いしころ ずかん</h2>
+        <div class="dex-count"><span id="dex-found">0</span> / <span id="dex-total">0</span></div>
+      </div>
+      <div class="dex-bar"><div class="dex-bar-fill" id="dex-bar-fill"></div></div>
+      <div class="dex-grid" id="dex-grid"></div>
+      <h2 class="h2 mt">みつけもの</h2>
+      <div class="finds-grid" id="finds-grid"></div>
+    </section>
+
+    <!-- ---------- たな ---------- -->
+    <section class="screen" id="sc-shelf">
+      <p class="murmur" id="shelf-murmur">おきにいりを ならべて ながめよう。</p>
+      <div class="cv-wrap ratio-shelf">
+        <canvas id="cv-shelf" width="160" height="176"></canvas>
+      </div>
+      <div class="tray-head"><h2 class="h2">いしばこ</h2><span class="dim" id="tray-hint">石を えらんで、たなを タップ</span></div>
+      <div class="tray-grid" id="tray-grid"></div>
+      <p class="empty-note" id="tray-empty">まだ 石が ありません。</p>
+    </section>
+
+  </main>
+
+  <!-- ================= 下のタブ ================= -->
+  <nav id="tabbar">
+    <button class="tab on" data-screen="field"><span class="ic">🏞</span><span>ひろう</span></button>
+    <button class="tab" data-screen="wash"><span class="ic">🫧</span><span>あらう</span><i class="badge" id="tab-badge">0</i></button>
+    <button class="tab" data-screen="dex"><span class="ic">📖</span><span>ずかん</span></button>
+    <button class="tab" data-screen="shelf"><span class="ic">🪟</span><span>たな</span></button>
+  </nav>
+</div>
+
+<!-- ================= 汎用モーダル ================= -->
+<div id="modal" hidden>
+  <div class="modal-back"></div>
+  <div class="modal-box">
+    <h3 id="modal-title">—</h3>
+    <div id="modal-body"></div>
+    <div class="modal-foot"><button class="btn wide" id="modal-close">とじる</button></div>
+  </div>
+</div>
+
+<div id="toast-host"></div>
+
+<!-- ================= はじまりの あいさつ ================= -->
+<div id="opening">
+  <div class="op-inner">
+    <canvas id="cv-title" width="160" height="120"></canvas>
+    <h1>いしあらい工房</h1>
+    <p>どろだらけの 石を あらって、<br>ひかりに かざして、<br>ずかんを うめていく お話。</p>
+    <button class="btn big primary" id="btn-start">はじめる</button>
+    <small class="dim">音が でます（あとで けせます）</small>
+  </div>
+</div>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>
