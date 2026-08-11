@@ -375,12 +375,19 @@ function gravel(b, line, base, seed){
   for (let x = 0; x < W; x++){
     for (let y = line[x]; y < H; y += 1){
       const h = hashInt(x, y, seed);
-      if (h % 11 === 0){
-        b.fillStyle = rgb2hex(...mixc(base, '#ffffff', .3));
+      if (h % 17 === 0){
+        b.fillStyle = rgb2hex(...mixc(base, '#ffffff', .26));
         b.fillRect(x, y, 1 + (h % 2), 1);
-      } else if (h % 17 === 0){
-        b.fillStyle = rgb2hex(...mixc(base, '#4a3f2c', .4));
+      } else if (h % 29 === 0){
+        b.fillStyle = rgb2hex(...mixc(base, '#4a3f2c', .3));
         b.fillRect(x, y, 1 + (h % 3), 1);
+      } else if (h % 211 === 0){
+        // ときどき 大きめの 小石
+        const col = mixc(base, h % 2 ? '#8f8574' : '#cfc4ac', .55);
+        b.fillStyle = rgb2hex(...col);
+        b.fillRect(x, y, 3, 2);
+        b.fillStyle = rgb2hex(...mixc(col, '#ffffff', .35));
+        b.fillRect(x, y, 2, 1);
       }
     }
   }

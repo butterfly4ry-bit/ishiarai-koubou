@@ -138,7 +138,6 @@ export function resetBackdrop(){ bgKey = ''; }
 function drawCat(){
   const x = 22, y = 60;   // あしもと
   const body = '#e8c79a', dark = '#c9a273', ear = '#f0d8c0';
-  const sway = Math.sin(t * 1.6) * 2;
   // しっぽ
   g.fillStyle = dark;
   for (let i = 0; i < 8; i++){
